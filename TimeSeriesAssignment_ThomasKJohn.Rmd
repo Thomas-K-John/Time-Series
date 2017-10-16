@@ -1,0 +1,197 @@
+---
+title: "TimeSeries"
+author: "Thomas K John"
+date: "August 9, 2017"
+output: html_document
+---
+##Agenda
+Building time series models in using GE Power Stock in the BSE.Our goal is to forecast the closing price of the GEPower for future time period using time series algorithms and evaluating each of the algorithms.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+### Clearing the environment variables
+```{r}
+rm(list = ls(all = TRUE))
+```
+### Setting the path
+```{r}
+setwd("I:/DATA-SCIENCE/Insofe/Assignments/TimeSeriesAssignment")
+```
+### Library Call
+```{r}
+library(forecast)
+library(lubridate)
+library(DataCombine)
+library(imputeTS)
+library(dplyr)
+library(TTR)
+library(graphics)
+library(data.table)
+library(plyr)
+library(zoo)
+library(Quandl)
+```
+
+```{r}
+data <- Quandl("BSE/BOM532309", api_key="9Yu3LJ2TVs9MHek4ZwQX")
+```
+
+```{r}
+head(data, 20)
+```
+
+```{r}
+minDate=min(as.Date(data$Date,format="%Y-%m-%d"))
+maxDate =max(as.Date(data$Date,format="%Y-%m-%d"))
+```
+
+### Creating a data frame for sequence of Days
+```{r }
+seq <- data.frame("dateRange"=seq(minDate,maxDate,by="days"))
+summary(data)
+```
+
+### Merging the data with sequence generated and imputing the missing values for Closed Price
+```{r}
+merged.dataframe = merge(seq, data,by.x="dateRange", by.y="Date",all.x=T)
+summary(merged.dataframe)
+tail(merged.dataframe, 20)
+merged.dataframe$Close = na.locf(merged.dataframe$Close)
+```
+
+### Splitting the data into train and test
+```{r}
+train.data = merged.dataframe[which(merged.dataframe$dateRange < as.POSIXct("2017-07-21", format="%Y-%m-%d")),]
+test.data = merged.dataframe[which(merged.dataframe$dateRange >= as.POSIXct("2017-07-21",format="%Y-%m-%d")),]
+stock.closing.price <- ts(merged.dataframe$Close,frequency = 365, start = c(2000,3,21))
+plot(stock.closing.price, type="l",lwd=3, col="red", ylab="Stock Closing Price",
+     main="Time series plot for GE Power Stock in BSE ")
+
+
+```
+### Decomposed Time Series
+```{r}
+stock.price.decomposed=decompose(stock.closing.price)
+plot(stock.price.decomposed,col="Red")
+```
+### ACF and PACF
+```{r}
+par(mfrow=c(2,2))
+acf(stock.closing.price,lag=365)
+pacf(stock.closing.price,lag=365)
+```
+
+### Modelling  the time series using simple moving averages
+* Time series Price has trend 
+* Modelling the time series behaviour by simple moving averages
+```{r}
+fitsma <- SMA(stock.closing.price,n=2)
+pred<-forecast(fitsma,h=30)
+plot(pred)
+lines(fitsma,col="red")
+```
+### Define the metric MAPE 
+```{r}
+sma.mape <- mean(abs((stock.closing.price[2:length(stock.closing.price)]-fitsma[2:length(stock.closing.price)])/stock.closing.price[2:length(stock.closing.price)]))
+sma.mape
+```
+
+### Weighted Moving Averages
+```{r}
+fitwma<- WMA(stock.closing.price,n=2,1:2)
+wma.mape <- mean(abs((stock.closing.price[2:length(stock.closing.price)]-fitwma[2:length(stock.closing.price)])/stock.closing.price[2:length(stock.closing.price)]))
+wma.mape
+pred<-forecast(fitwma,h=30)
+plot(pred)
+lines(fitwma,col="blue")
+```
+
+### Exponential Moving Averages
+```{r}
+fitEma <- EMA(stock.closing.price, n = 2)
+ema.mape <- mean(abs((stock.closing.price[2:length(stock.closing.price)]-fitEma[2:length(stock.closing.price)])/stock.closing.price[2:length(stock.closing.price)]))
+ema.mape
+pred<-forecast(fitEma,h=30)
+plot(pred)
+lines(fitEma,col="purple")
+```
+
+### Build a HoltWinters model  with trend 
+```{r}
+holtpriceforecast <- HoltWinters(stock.closing.price,gamma=FALSE)
+head(holtpriceforecast$fitted)
+```
+
+### HoltWinters model  with trend  and Seasonality
+```{r}
+priceholtforecast <- HoltWinters(stock.closing.price, beta=TRUE, gamma=TRUE, seasonal="additive")
+head(priceholtforecast$fitted)
+```
+*Since you are building the models on weekly data, you will get 52 seasonal components. If you   are reading the monthly data, you will get 12 seasonal components
+
+### Prediction on the Train
+```{r}
+holtforecastTrain <- data.frame(priceholtforecast$fitted)
+holtforecastTrainpredictions <- holtforecastTrain$xhat
+head(holtforecastTrainpredictions)
+```
+
+### Prediction on test data
+```{r}
+priceforecast<-forecast(priceholtforecast,h = 30)
+plot(priceforecast, ylim= c(0,200))
+
+```
+
+
+### Arima Model 1 : Considering the difference from the graph as d=1 to stationarize
+```{r}
+
+model1 <- arima(stock.closing.price,c(0,1,0))
+model1
+acf(stock.closing.price, lag = 365) 
+pacf(stock.closing.price, lag = 365)
+plot(stock.closing.price, lag = 365)
+```
+### ARIMA MOdels 2: Considering Arima(1,1,1)
+```{r}
+model2 <- arima(stock.closing.price,c(1,1,1))
+model2
+acf(diff(stock.closing.price,lag = 365))
+pacf(diff(stock.closing.price,lag = 365))
+plot(diff(stock.closing.price))
+```
+
+### Plots of the models
+
+```{r}
+par(mfrow=c(2,2))
+plot(model1$residuals,ylim=c(-100,100))
+plot(model2$residuals,ylim=c(-100,100))
+```
+###  Auto Arima
+```{r}
+MODEL_ARIMA <- auto.arima(stock.closing.price, ic='aic')
+summary(MODEL_ARIMA)
+```
+
+### Forecast on the models 
+```{r}
+pricearimaforecasts1 <- forecast(model1, h=30)
+plot(pricearimaforecasts1)
+pricearimaforecast3 <- forecast(model2, h=30)
+plot(pricearimaforecast3)
+pricearimaforecasts_autArima<- forecast(MODEL_ARIMA,h=30)
+plot(pricearimaforecasts_autArima,flwd = 2)
+summary(MODEL_ARIMA)
+
+```
+
+
+
+
+
+
+
+
